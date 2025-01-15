@@ -1,0 +1,24 @@
+# load in stuff from previous file
+
+for x in range(5):
+  plot_one_image(data, labels, x)
+
+print('One image looks like:\n', data[0], '\n')
+print("Length of list:", len(data[0]))
+
+# dataset looks like this
+print ('Data shape:', data.shape)
+print ('Data:\n', data)
+
+# KNN MODEL 
+X_train, X_test, y_train, y_test = model_selection.train_test_split(data, labels, test_size=0.2, random_state=1)
+
+knn_model = KNeighborsClassifier(n_neighbors = 3) 
+
+knn_model.fit(X_train, y_train) # Change this!
+predictions = knn_model.predict(X_test)
+accuracy_score(predictions, y_test) # gives accuracy 
+
+image_id = 210 
+plot_one_image(X_test, y_test, image_id)
+print('prediction:', knn_model.predict([X_test[image_id]])[0])
