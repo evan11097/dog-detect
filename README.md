@@ -1,2 +1,1 @@
-# drteryttuyyuyrt
-ertrteertretrteerret
+#detect dogs from image data
