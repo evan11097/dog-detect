@@ -1,0 +1,187 @@
+from sklearn.neural_network import MLPClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn import model_selection
+from sklearn.metrics import accuracy_score
+from collections import Counter
+import tensorflow.keras as keras
+from keras.models import Sequential
+from keras.layers import Dense, Conv2D
+from keras.layers import Activation, MaxPooling2D, Dropout, Flatten, Reshape
+from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import cross_val_score
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
+
+def categorical_to_onehot(labels_in):
+  labels = []
+  for label in labels_in:
+    if label == 'dog':
+      labels.append(np.array([1, 0]))
+    else:
+      labels.append(np.array([0, 1]))
+  return np.array(labels)
+
+def one_hot_encoding(input):
+  output = np.zeros((input.size, input.max()+1))
+  output[np.arange(input.size), input] = 1
+
+  return output
+
+
+def load_data():
+  # Run this cell to download our data into a file called 'cifar_data'
+  !wget -O cifar_data https://storage.googleapis.com/inspirit-ai-data-bucket-1/Data/AI%20Scholars/Sessions%201%20-%205/Session%204%20_%205%20-%20Neural%20Networks%20_%20CNN/dogs_v_roads
+
+  # now load the data from our cloud computer
+  import pickle
+  data_dict = pickle.load(open( "cifar_data", "rb" ));
+
+  data   = data_dict['data']
+  labels = data_dict['labels']
+
+  return data, labels
+
+def plot_one_image(data, labels, img_idx):
+  from google.colab.patches import cv2_imshow
+  import cv2
+  import matplotlib.pyplot as plt
+
+  my_img   = data[img_idx, :].reshape([32,32,3]).copy()
+  my_label = labels[img_idx]
+  print(f'label: {my_label}')
+
+  fig, ax = plt.subplots(1,1)
+  img = ax.imshow(my_img.astype('uint8'), extent=[-1,1,-1,1])
+
+  x_label_list = [0, 8, 16, 24, 32]
+  y_label_list = [0, 8, 16, 24, 32]
+
+  ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+  ax.set_yticks([-1, -0.5, 0, 0.5, 1])
+
+  ax.set_xticklabels(x_label_list)
+  ax.set_yticklabels(y_label_list)
+
+  fig.show(img)
+
+def logits_to_one_hot_encoding(input):
+    output = np.zeros_like(input, dtype=int)
+    output[np.arange(len(input)), np.argmax(input, axis=1)] = 1
+    return output
+
+
+class CNNClassifier:
+    """
+      stuff (not code)
+        model (keras.models.Sequential): The underlying Keras Sequential model.
+
+    Methods:
+        build_model(): Constructs the CNN model with the specified architecture and compiles it.
+
+        fit(*args, **kwargs): Trains the model. Accepts arguments compatible with the Keras `fit` method.
+
+        predict(*args, **kwargs): predicts labels for the input data, converts the softmax output of the model
+                                  to one-hot encoded format using `logits_to_one_hot_encoding`. necessary to match
+                                  accuracy_score function expected arguments.
+        predict_proba(*args, **kwargs): predicts labels for the input data and returns the raw output of the softma
+                                       used when wanting to inspect the raw probabilistic scoring of the model.
+
+    Usage:
+        cnn_classifier = CNNClassifier(num_epochs=30, layers=4, dropout=0.5)
+        cnn_classifier.fit(X_train, y_train)
+        predictions = cnn_classifier.predict(X_test)
+
+    Note:
+        The `__getattr__` method is overridden to delegate attribute access to the underlying Keras model,
+        except for the `predict` method which is customized.
+    """
+    def __init__(self, num_epochs=30, layers=4, dropout=0.5):
+        self.num_epochs = num_epochs
+        self.layers = layers
+        self.dropout = dropout
+        self.model = self.build_model()
+
+    def build_model(self):
+        model = Sequential()
+        model.add(Reshape((32, 32, 3)))
+
+        for i in range(self.layers):
+          model.add(Conv2D(32, (3, 3), padding='same'))
+          model.add(Activation('relu'))
+
+        model.add(Conv2D(32, (3, 3)))
+        model.add(Activation('relu'))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Dropout(self.dropout))
+
+        model.add(Conv2D(64, (3, 3), padding='same'))
+        model.add(Activation('relu'))
+        model.add(Conv2D(64, (3, 3)))
+        model.add(Activation('relu'))
+        model.add(MaxPooling2D(pool_size=(2, 2)))
+        model.add(Dropout(self.dropout))
+
+        model.add(Flatten())
+        model.add(Dense(512))
+        model.add(Activation('relu'))
+        model.add(Dropout(self.dropout))
+        model.add(Dense(2))
+        model.add(Activation('softmax'))
+        opt = keras.optimizers.RMSprop(learning_rate=0.0001, decay=1e-6)
+        model.compile(loss='categorical_crossentropy', optimizer=opt, metrics=['accuracy'])
+
+        return model
+
+    def fit(self, *args, **kwargs):
+        return self.model.fit(*args, epochs=self.num_epochs, batch_size=10, verbose=2, **kwargs)
+
+    #NOTE: WRITTEN TO RETURN ONE HOT ENCODINGS FOR ACCURACY
+    def predict(self, *args, **kwargs):
+        predictions = self.model.predict(*args, **kwargs)
+        return logits_to_one_hot_encoding(predictions)
+
+    def predict_proba(self, *args, **kwargs):
+        predictions = self.model.predict(*args, **kwargs)
+        return predictions
+
+    def score(self, X, y):
+        predictions = self.predict(X)
+        return accuracy_score(y, predictions)
+
+    def __getattr__(self, name):
+        if name != 'predict' and name != 'predict_proba':
+            return getattr(self.model, name)
+        else:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+
+def plot_acc(history, ax = None, xlabel = 'Epoch #'):
+    history = history.history
+    history.update({'epoch':list(range(len(history['val_accuracy'])))})
+    history = pd.DataFrame.from_dict(history)
+
+    best_epoch = history.sort_values(by = 'val_accuracy', ascending = False).iloc[0]['epoch']
+
+    if not ax:
+      f, ax = plt.subplots(1,1)
+    sns.lineplot(x = 'epoch', y = 'val_accuracy', data = history, label = 'Validation', ax = ax)
+    sns.lineplot(x = 'epoch', y = 'accuracy', data = history, label = 'Training', ax = ax)
+    ax.axhline(0.5, linestyle = '--',color='red', label = 'Chance')
+    ax.axvline(x = best_epoch, linestyle = '--', color = 'green', label = 'Best Epoch')
+    ax.legend(loc = 7)
+    ax.set_ylim([0.4, 1])
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel('Accuracy (Fraction)')
+
+    plt.show()
+
+    data, labels = load_data() #LOADS DATA!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    plot_one_image(data, labels, 0)
